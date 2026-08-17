@@ -3,7 +3,9 @@ import { adx, atr, ema, sma } from "./indicators";
 import { buildProfile, profileGate, type VolumeProfile } from "./profile";
 
 export type TapeFamily = "benchmark" | "trend" | "reversion" | "router";
+
 export type HtfBias = "up" | "down" | "flat";
+
 export type HtfRead = { bias: HtfBias; why: string };
 
 export type TapeCache = {
@@ -23,7 +25,10 @@ export function buildTape(candles: Candle[]): TapeCache {
     ema26: ema(closes, 26),
     atr14: atr(candles, 14),
     adx14: adx(candles, 14),
-    volSma: sma(candles.map((c) => c.volume), 20),
+    volSma: sma(
+      candles.map((c) => c.volume),
+      20,
+    ),
   };
 }
 
@@ -96,11 +101,12 @@ export function passEntry(
   i: number,
   family: TapeFamily,
   side: "long" | "short" = "long",
-  htf?: HtfRead,
+  _htf?: HtfRead,
   profile?: VolumeProfile | null,
 ): { ok: boolean; why: string } {
   if (family === "benchmark") return { ok: true, why: "Benchmark." };
   if (i < 26 || i >= candles.length) return { ok: false, why: "Not enough bars." };
+
   const bar = candles[i]!;
   const range = bar.high - bar.low;
   const loc = range > 0 ? (bar.close - bar.low) / range : 0.5;
@@ -112,39 +118,63 @@ export function passEntry(
   const vRef = tape.volSma[i - 1] ?? tape.volSma[i];
   const volMult = vRef && vRef > 0 ? bar.volume / vRef : 1;
   const spent =
-    i >= 20 && candles[i - 20]!.close > 0 ? bar.close / candles[i - 20]!.close - 1 : 0;
+    i >= 20 && candles[i - 20]!.close > 0
+      ? bar.close / candles[i - 20]!.close - 1
+      : 0;
+
   const trending = dmi != null && dmi >= 22;
   const quiet = dmi != null && dmi < 16;
   const mode: "trend" | "reversion" =
     family === "router" ? (trending ? "trend" : "reversion") : family === "reversion" ? "reversion" : "trend";
-  if (side === "long" && htf?.bias === "down") return { ok: false, why: `Against HTF · ${htf.why}` };
-  if (side === "short" && htf?.bias === "up") return { ok: false, why: `Against HTF · ${htf.why}` };
+
   if (side === "long") {
-    if (a0 != null && a0 > 0 && e20 != null && bar.close - e20 > 2 * a0)
+    if (a0 != null && a0 > 0 && e20 != null && bar.close - e20 > 2 * a0) {
       return { ok: false, why: "Chase — 2 ATR over EMA 20." };
-    if (mode === "trend" && spent > 0.08) return { ok: false, why: "Day already ran 8%." };
-    if (mode === "trend" && volMult < 0.9) return { ok: false, why: "No volume behind the long." };
-    if (mode === "reversion" && volMult > 3.2) return { ok: false, why: "Climax print — not a fade." };
-    if (mode === "trend" && loc < 0.45) return { ok: false, why: "Closed weak — lower half of the bar." };
-    if (mode === "trend" && quiet) return { ok: false, why: "ADX dead — no trend." };
-    if (mode === "reversion" && trending && dmi != null && dmi >= 28)
+    }
+    if (mode === "trend" && spent > 0.08) {
+      return { ok: false, why: "Day already ran 8%." };
+    }
+    if (mode === "trend" && volMult < 0.9) {
+      return { ok: false, why: "No volume behind the long." };
+    }
+    if (mode === "reversion" && volMult > 3.2) {
+      return { ok: false, why: "Climax print — not a fade." };
+    }
+    if (mode === "trend" && loc < 0.45) {
+      return { ok: false, why: "Closed weak — lower half of the bar." };
+    }
+    if (mode === "trend" && quiet) {
+      return { ok: false, why: "ADX dead — no trend." };
+    }
+    if (mode === "reversion" && trending && dmi != null && dmi >= 28) {
       return { ok: false, why: "ADX 28+ — skip the fade." };
-    if (mode === "trend" && e12 != null && e26 != null && e12 < e26)
+    }
+    if (mode === "trend" && e12 != null && e26 != null && e12 < e26) {
       return { ok: false, why: "Against 12/26." };
+    }
     const pg = profileGate(profile ?? null, bar.close, a0, mode, "long");
     if (pg && !pg.ok) return pg;
-    return { ok: true, why: htf?.bias === "up" ? `Tape clear · ${htf.why}` : "Tape clear." };
+    return { ok: true, why: "Tape clear." };
   }
-  if (a0 != null && a0 > 0 && e20 != null && e20 - bar.close > 2 * a0)
+
+  if (a0 != null && a0 > 0 && e20 != null && e20 - bar.close > 2 * a0) {
     return { ok: false, why: "Chase — 2 ATR under EMA 20." };
-  if (mode === "trend" && spent < -0.08) return { ok: false, why: "Day already dumped 8%." };
-  if (mode === "trend" && volMult < 0.9) return { ok: false, why: "No volume behind the short." };
-  if (mode === "trend" && loc > 0.55) return { ok: false, why: "Closed strong — upper half of the bar." };
-  if (mode === "trend" && e12 != null && e26 != null && e12 > e26)
+  }
+  if (mode === "trend" && spent < -0.08) {
+    return { ok: false, why: "Day already dumped 8%." };
+  }
+  if (mode === "trend" && volMult < 0.9) {
+    return { ok: false, why: "No volume behind the short." };
+  }
+  if (mode === "trend" && loc > 0.55) {
+    return { ok: false, why: "Closed strong — upper half of the bar." };
+  }
+  if (mode === "trend" && e12 != null && e26 != null && e12 > e26) {
     return { ok: false, why: "Against 12/26." };
+  }
   const pg = profileGate(profile ?? null, bar.close, a0, mode, "short");
   if (pg && !pg.ok) return pg;
-  return { ok: true, why: htf?.bias === "down" ? `Tape clear · ${htf.why}` : "Tape clear." };
+  return { ok: true, why: "Tape clear." };
 }
 
 export function readSignal(
